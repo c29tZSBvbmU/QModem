@@ -8,9 +8,17 @@ source "${QMODEM_HOME:-/usr/share/qmodem}/generic.sh"
 source "${QMODEM_HOME:-/usr/share/qmodem}/cmds/meig.sh"
 debug_subject="meig_ctrl"
 
+meig_is_pcie()
+{
+    [ "$(uci -q get "qmodem.$config_section.data_interface")" = "pcie" ]
+}
+
 vendor_get_disabled_features(){
     json_add_string "" "NeighborCell"
     json_add_string "" "LockBand"
+    if meig_is_pcie; then
+        json_add_string "" "DialMode"
+    fi
 }
 
 # Return raw data   
@@ -31,6 +39,15 @@ set_imei(){
 # Get dial mode
 get_mode()
 {
+    # AT+SER describes USB composition, including when USB supplies the AT port.
+    if meig_is_pcie; then
+        local active="0"
+        case "$(get_driver)" in mhi|qmi) active="1" ;; esac
+        json_add_object "mode"
+        json_add_string "qmi" "$active"
+        json_close_object
+        return
+    fi
     local mode_num=$(cmd_ser_query "$at_port" | grep "+SER:" | sed 's/+SER: //g' | sed 's/\r//g')
     local mode
     case "$platform" in
@@ -77,6 +94,12 @@ get_mode()
 # Set dial mode
 set_mode()
 {
+    if meig_is_pcie; then
+        json_select "result"
+        json_add_string "set_mode" "ERROR: PCIe mode is selected by its data driver"
+        json_close_object
+        return 1
+    fi
     local mode=$1
     case "$platform" in
         "qualcomm"|"lte12"|"lte")
